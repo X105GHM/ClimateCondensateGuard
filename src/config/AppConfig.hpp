@@ -15,22 +15,22 @@ namespace config
         static constexpr int kEthRst = 9;
         static constexpr int kEthInt = 10;
 
-        static constexpr int kUltrasonicTrig = 4;
-        static constexpr int kUltrasonicEcho = 5;
-        static constexpr int kWaterSensor = 6;
-        static constexpr int kPumpGate = 7;
+        static constexpr int kUltrasonicTrig = 17;
+        static constexpr int kUltrasonicEcho = 21;
+        static constexpr int kWaterSensor = 3;
+        static constexpr int kPumpGate = 18;
         static constexpr int kClimateEnable = 15;
-        static constexpr int kBuzzer = 16;
-        static constexpr int kHallCurrentAdc = 1;
+        static constexpr int kBuzzer = 43;
+        static constexpr int kHallCurrentAdc = 2;
     };
 
     struct TankConfig
     {
-        float sensorToBottomMm = 220.0F;
-        float pumpOnLevelMm = 120.0F;
+        float sensorToBottomMm = 206.4F;
+        float pumpOnLevelMm = 160.0F;
         float pumpOffLevelMm = 40.0F;
-        float validMinMm = 20.0F;
-        float validMaxMm = 220.0F;
+        float validMinMm = 25.0F;
+        float validMaxMm = 206.4F;
     };
 
     struct WaterSensorConfig
@@ -42,16 +42,25 @@ namespace config
     {
         float adcRefMv = 3300.0F;
         float adcMaxCounts = 4095.0F;
-        float zeroCurrentMv = 1650.0F;
-        float sensitivityMvPerA = 100.0F;
-        float currentDetectedA = 0.25F;
+        float zeroCurrentMv = 1600.0F;
+        float sensitivityMvPerA = 50.0F;
+        float currentDetectedA = 0.2F;
     };
 
     struct PumpSafetyConfig
     {
         uint32_t noCurrentFaultDelayMs = 2500;
-        uint32_t noDrainFaultDelayMs = 12000;
-        float minRequiredLevelDropMm = 12.0F;
+        uint32_t noDrainFaultDelayMs = 600000;
+        float minRequiredLevelDropMm = 5.0F;
+    };
+
+    struct UltrasonicConfig
+    {
+        uint32_t echoTimeoutUs = 8000;
+        bool filterEnabled = true;
+        float filterAlpha = 0.25F;
+        float maxAcceptedJumpMm = 60.0F;
+        uint8_t maxInvalidHoldCount = 3;
     };
 
     struct EnergyConfig
@@ -61,8 +70,8 @@ namespace config
         uint16_t modbusPort = 502;
         uint8_t modbusUnitId = 1;
 
-        int32_t startExportThresholdW = 250;
-        int32_t stopImportThresholdW = 50;
+        int32_t startExportThresholdW = 1500;
+        int32_t stopImportThresholdW = 1500;
         uint16_t minBatterySocPercent = 25;
         uint32_t pollIntervalMs = 5000;
     };
@@ -70,6 +79,13 @@ namespace config
     struct WebConfig
     {
         uint16_t port = 80;
+    };
+
+    struct OtaConfig
+    {
+        bool enabled = true;
+        String username = "admin";
+        String password = "av>zk55U=)CCgVeWpwX";
     };
 
     struct TaskConfig
@@ -100,9 +116,11 @@ namespace config
     inline constexpr WaterSensorConfig kWater{};
     inline constexpr CurrentSensorConfig kCurrent{};
     inline constexpr PumpSafetyConfig kPumpSafety{};
+    inline constexpr UltrasonicConfig kUltrasonic {};
     inline const EnergyConfig kEnergy{};
     inline const ClimateNetworkConfig kClimateNet {};
     inline constexpr WebConfig kWeb{};
+    inline const OtaConfig kOta {};
     inline constexpr TaskConfig kTask{};
     inline constexpr OperationMode kDefaultMode = OperationMode::Auto;
 }

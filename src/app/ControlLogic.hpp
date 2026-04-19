@@ -2,6 +2,8 @@
 
 #include <Arduino.h>
 #include <atomic>
+
+#include "core/Types.hpp"
 #include "core/Logger/Logger.hpp"
 #include "core/SharedState/SharedState.hpp"
 #include "drivers/PumpController/PumpController.hpp"
@@ -32,14 +34,19 @@ private:
     ClimateController &climate_;
     BuzzerController &buzzer_;
 
-    std::atomic<OperationMode> requestedMode_{OperationMode::Auto};
-    std::atomic<bool> resetRequested_{false};
-    std::atomic<uint32_t> primeDurationMs_{0};
+    std::atomic<OperationMode> requestedMode_ {OperationMode::Auto};
+    std::atomic<bool> resetRequested_ {false};
+    std::atomic<uint32_t> primeDurationMs_ {0};
 
-    uint32_t latchedFaults_{0};
-    bool autoCoolingAllowed_{false};
-    bool lastPumpCommand_{false};
-    uint32_t pumpCommandSinceMs_{0};
-    float pumpStartLevelMm_{0.0F};
-    uint32_t forcedPumpUntilMs_{0};
+    uint32_t latchedFaults_ {0};
+
+    bool autoCoolingAllowed_ {false};
+    bool lastPumpCommand_ {false};
+
+    uint32_t pumpCommandSinceMs_ {0};
+    float pumpStartLevelMm_ {0.0F};
+
+    uint32_t forcedPumpUntilMs_ {0};
+
+    uint32_t faultResetGraceUntilMs_ {0};
 };

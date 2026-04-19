@@ -6,13 +6,22 @@ E3dcModbusClient::E3dcModbusClient(Logger &logger) : logger_(logger){}
 
 bool E3dcModbusClient::poll(const IPAddress &ip, const uint16_t port, const uint8_t unitId, E3dcTelemetry &telemetryOut)
 {
-    // E3/DC documentation uses 40068..40085 for the core performance block.
-    // On the Modbus wire, holding register 40001 corresponds to address 0.
     constexpr uint16_t kStartRegister = static_cast<uint16_t>(40068U - 40001U);
     constexpr uint16_t kRegisterCount = 18;
 
     uint8_t payload[kRegisterCount * 2]{};
-    const bool ok = readHoldingRegisters(ip, port, unitId, kStartRegister, kRegisterCount, payload, sizeof(payload));
+
+    const bool ok = readHoldingRegisters
+    (
+        ip,
+        port,
+        unitId,
+        kStartRegister,
+        kRegisterCount,
+        payload,
+        sizeof(payload)
+    );
+
     if (!ok)
     {
         telemetryOut.valid = false;
@@ -20,25 +29,27 @@ bool E3dcModbusClient::poll(const IPAddress &ip, const uint16_t port, const uint
     }
 
     telemetryOut.valid = true;
-    telemetryOut.pvPowerW = parseInt32BE(&payload[0]);
-    telemetryOut.batteryPowerW = parseInt32BE(&payload[4]);
-    telemetryOut.housePowerW = parseInt32BE(&payload[8]);
-    telemetryOut.gridPointPowerW = parseInt32BE(&payload[12]);
-    telemetryOut.batterySocPercent = parseUInt16BE(&payload[30]);
-    telemetryOut.emsStatus = parseUInt16BE(&payload[34]);
+
+    telemetryOut.pvPowerW = parseInt32BE(&payload[0]);          // 40068 / 40069
+    telemetryOut.batteryPowerW = parseInt32BE(&payload[4]);     // 40070 / 40071
+    telemetryOut.housePowerW = parseInt32BE(&payload[8]);       // 40072 / 40073
+    telemetryOut.gridPointPowerW = parseInt32BE(&payload[12]);  // 40074 / 40075
+    telemetryOut.batterySocPercent = parseUInt16BE(&payload[30]); // 40083
+    telemetryOut.emsStatus = parseUInt16BE(&payload[34]);         // 40085
 
     return true;
 }
 
 bool E3dcModbusClient::readHoldingRegisters
 (
-    const IPAddress &ip, 
+    const IPAddress &ip,
     const uint16_t port,
     const uint8_t unitId,
     const uint16_t startRegister,
     const uint16_t count,
     uint8_t *buffer,
-    const size_t bufferLen)
+    const size_t bufferLen
+)
 {
     if ((count * 2U) > bufferLen)
     {
@@ -56,6 +67,7 @@ bool E3dcModbusClient::readHoldingRegisters
     }
 
     ++transactionId_;
+
     uint8_t request[12]{};
     request[0] = static_cast<uint8_t>(transactionId_ >> 8);
     request[1] = static_cast<uint8_t>(transactionId_ & 0xFF);
@@ -78,7 +90,8 @@ bool E3dcModbusClient::readHoldingRegisters
     }
 
     uint8_t responseHeader[9]{};
-    const size_t expectedHeader = sizeof(responseHeader);
+    constexpr size_t expectedHeader = sizeof(responseHeader);
+
     if (client.readBytes(responseHeader, expectedHeader) != expectedHeader)
     {
         logger_.warn("modbus", "Short Modbus response header");
@@ -86,8 +99,27 @@ bool E3dcModbusClient::readHoldingRegisters
         return false;
     }
 
+    const uint16_t responseTransactionId =
+        (static_cast<uint16_t>(responseHeader[0]) << 8U) |
+        static_cast<uint16_t>(responseHeader[1]);
+
+    if (responseTransactionId != transactionId_)
+    {
+        logger_.warn("modbus", "Unexpected transaction ID");
+        client.stop();
+        return false;
+    }
+
+    const uint8_t responseUnitId = responseHeader[6];
     const uint8_t functionCode = responseHeader[7];
     const uint8_t byteCount = responseHeader[8];
+
+    if (responseUnitId != unitId)
+    {
+        logger_.warn("modbus", "Unexpected unit ID: " + String(responseUnitId));
+        client.stop();
+        return false;
+    }
 
     if (functionCode != 0x03)
     {
@@ -116,20 +148,18 @@ bool E3dcModbusClient::readHoldingRegisters
 
 int32_t E3dcModbusClient::parseInt32BE(const uint8_t *data)
 {
-    return static_cast<int32_t>
-    (
-        (static_cast<uint32_t>(data[0]) << 24U) |
-        (static_cast<uint32_t>(data[1]) << 16U) |
-        (static_cast<uint32_t>(data[2]) << 8U) |
-        static_cast<uint32_t>(data[3])
-    );
+    const uint32_t raw =
+        (static_cast<uint32_t>(data[2]) << 24U) |
+        (static_cast<uint32_t>(data[3]) << 16U) |
+        (static_cast<uint32_t>(data[0]) << 8U)  |
+        static_cast<uint32_t>(data[1]);
+
+    return static_cast<int32_t>(raw);
 }
 
 uint16_t E3dcModbusClient::parseUInt16BE(const uint8_t *data)
 {
-    return static_cast<uint16_t>
-    (
+    return static_cast<uint16_t>(
         (static_cast<uint16_t>(data[0]) << 8U) |
-        static_cast<uint16_t>(data[1])
-    );
+        static_cast<uint16_t>(data[1]));
 }

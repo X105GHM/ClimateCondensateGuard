@@ -10,7 +10,12 @@ namespace
     {
         return (mask & kFaultMaskPumpIssues) != 0U;
     }
-} 
+
+    bool timeBefore(const uint32_t now, const uint32_t target)
+    {
+        return static_cast<int32_t>(now - target) < 0;
+    }
+}
 
 ControlLogic::ControlLogic
 (
@@ -31,22 +36,42 @@ void ControlLogic::tick()
 {
     const uint32_t now = millis();
     SystemStateData snapshot = sharedState_.snapshot();
-    uint32_t liveFaults = snapshot.faultMask;
+
+    uint32_t liveFaults = 0U;
 
     if (resetRequested_.exchange(false))
     {
-        if (!snapshot.sensors.overflowSensorWet)
-        {
-            latchedFaults_ = 0U;
-            logger_.warn("ctrl", "Fault latch cleared by user request");
-        }
-        else
+        if (snapshot.sensors.overflowSensorWet)
         {
             logger_.warn("ctrl", "Fault reset ignored because overflow sensor is still wet");
         }
+        else
+        {
+            latchedFaults_ = 0U;
+
+            pumpCommandSinceMs_ = 0U;
+            pumpStartLevelMm_ = snapshot.sensors.levelMm;
+            forcedPumpUntilMs_ = 0U;
+            lastPumpCommand_ = false;
+
+            faultResetGraceUntilMs_ = now + 2000U;
+
+            buzzer_.setAlarm(false);
+
+            sharedState_.update([&](SystemStateData &state)
+            {
+                state.faultMask = 0U;
+                state.actuators.buzzerEnabled = false;
+            });
+
+            logger_.warn("ctrl", "Fault latch cleared by user request");
+        }
     }
 
+    const bool faultResetGraceActive = faultResetGraceUntilMs_ != 0U && timeBefore(now, faultResetGraceUntilMs_);
+
     const OperationMode requestedMode = requestedMode_.load();
+
     if (snapshot.mode != requestedMode)
     {
         logger_.info("ctrl", "Mode changed to " + toString(requestedMode));
@@ -64,12 +89,26 @@ void ControlLogic::tick()
     setFault(liveFaults, kFaultEnergyOffline, config::kEnergy.enabled && !snapshot.energy.valid);
 
     const bool highLevel = snapshot.sensors.ultrasonicValid && (snapshot.sensors.levelMm >= config::kTank.pumpOnLevelMm);
+
     const bool lowLevel = snapshot.sensors.ultrasonicValid && (snapshot.sensors.levelMm <= config::kTank.pumpOffLevelMm);
+
     const bool overflow = snapshot.sensors.overflowSensorWet;
     const bool primeActive = now < forcedPumpUntilMs_;
 
+    const bool pumpNoCurrentLatched = hasFault(latchedFaults_, kFaultPumpNoCurrent);
+    const bool pumpNoDrainLatched = hasFault(latchedFaults_, kFaultPumpNoDrain);
+
     bool desiredPump = false;
-    if (overflow || primeActive)
+
+    if (pumpNoCurrentLatched)
+    {
+        desiredPump = false;
+    }
+    else if (pumpNoDrainLatched && !overflow)
+    {
+        desiredPump = false;
+    }
+    else if (overflow || primeActive)
     {
         desiredPump = true;
     }
@@ -82,7 +121,9 @@ void ControlLogic::tick()
         desiredPump = highLevel;
     }
 
-    if (desiredPump && !lastPumpCommand_)
+    const bool pumpStartsNow = desiredPump && (!lastPumpCommand_ || pumpCommandSinceMs_ == 0U);
+
+    if (pumpStartsNow)
     {
         pumpCommandSinceMs_ = now;
         pumpStartLevelMm_ = snapshot.sensors.levelMm;
@@ -93,60 +134,38 @@ void ControlLogic::tick()
     {
         const uint32_t runtimeMs = now - pumpCommandSinceMs_;
 
-        if (runtimeMs >= config::kPumpSafety.noCurrentFaultDelayMs && !snapshot.sensors.pumpCurrentDetected)
+        if (!faultResetGraceActive &&
+            runtimeMs >= config::kPumpSafety.noCurrentFaultDelayMs &&
+            !snapshot.sensors.pumpCurrentDetected)
         {
             if (!hasFault(latchedFaults_, kFaultPumpNoCurrent))
             {
                 logger_.error("ctrl", "Pump commanded but no current detected");
             }
+
             setFault(latchedFaults_, kFaultPumpNoCurrent, true);
         }
 
-        if (runtimeMs >= config::kPumpSafety.noDrainFaultDelayMs &&
+        if (!faultResetGraceActive &&
+            runtimeMs >= config::kPumpSafety.noDrainFaultDelayMs &&
             snapshot.sensors.pumpCurrentDetected &&
             snapshot.sensors.ultrasonicValid)
         {
             const float dropMm = pumpStartLevelMm_ - snapshot.sensors.levelMm;
+
             if (dropMm < config::kPumpSafety.minRequiredLevelDropMm)
             {
                 if (!hasFault(latchedFaults_, kFaultPumpNoDrain))
                 {
                     logger_.error("ctrl", "Pump current flows but level does not fall");
                 }
+
                 setFault(latchedFaults_, kFaultPumpNoDrain, true);
             }
         }
     }
 
-    if (!desiredPump)
-    {
-        pumpCommandSinceMs_ = 0U;
-        pumpStartLevelMm_ = snapshot.sensors.levelMm;
-    }
-
     const uint32_t effectiveFaults = liveFaults | latchedFaults_;
-    autoCoolingAllowed_ = evaluateAutomaticCoolingPermission(snapshot);
-
-    bool climateWanted = false;
-    switch (requestedMode)
-    {
-    case OperationMode::Auto:
-        climateWanted = autoCoolingAllowed_;
-        break;
-    case OperationMode::ForcedOn:
-        climateWanted = true;
-        break;
-    case OperationMode::ForcedOff:
-        climateWanted = false;
-        break;
-    }
-
-    const bool criticalFault = hasFault(effectiveFaults, kFaultOverflowSensor) || isPumpFault(effectiveFaults);
-
-    if (criticalFault)
-    {
-        climateWanted = false;
-    }
 
     if (hasFault(effectiveFaults, kFaultPumpNoCurrent))
     {
@@ -156,6 +175,40 @@ void ControlLogic::tick()
     if (hasFault(effectiveFaults, kFaultPumpNoDrain) && !overflow)
     {
         desiredPump = false;
+    }
+
+    if (!desiredPump)
+    {
+        pumpCommandSinceMs_ = 0U;
+        pumpStartLevelMm_ = snapshot.sensors.levelMm;
+    }
+
+    autoCoolingAllowed_ = evaluateAutomaticCoolingPermission(snapshot);
+
+    bool climateWanted = false;
+
+    switch (requestedMode)
+    {
+    case OperationMode::Auto:
+        climateWanted = autoCoolingAllowed_;
+        break;
+
+    case OperationMode::ForcedOn:
+        climateWanted = true;
+        break;
+
+    case OperationMode::ForcedOff:
+        climateWanted = false;
+        break;
+    }
+
+    const bool criticalFault =
+        hasFault(effectiveFaults, kFaultOverflowSensor) ||
+        isPumpFault(effectiveFaults);
+
+    if (criticalFault)
+    {
+        climateWanted = false;
     }
 
     const bool buzzerWanted = criticalFault;
@@ -173,7 +226,7 @@ void ControlLogic::tick()
         state.energy.coolingAllowedAuto = autoCoolingAllowed_;
         state.actuators.pumpEnabled = desiredPump;
         state.actuators.climateEnabled = climateWanted;
-        state.actuators.buzzerEnabled = buzzerWanted; 
+        state.actuators.buzzerEnabled = buzzerWanted;
     });
 }
 
@@ -212,6 +265,7 @@ bool ControlLogic::evaluateAutomaticCoolingPermission(const SystemStateData &sna
             logger_.warn("energy", "Cooling auto permit removed");
             return false;
         }
+
         return true;
     }
 
@@ -228,25 +282,31 @@ bool ControlLogic::evaluateAutomaticCoolingPermission(const SystemStateData &sna
 String ControlLogic::faultsToText(const uint32_t faultMask) const
 {
     String text;
+
     if (hasFault(faultMask, kFaultOverflowSensor))
     {
         text += "overflow_sensor;";
     }
+
     if (hasFault(faultMask, kFaultPumpNoCurrent))
     {
         text += "pump_no_current;";
     }
+
     if (hasFault(faultMask, kFaultPumpNoDrain))
     {
         text += "pump_no_drain;";
     }
+
     if (hasFault(faultMask, kFaultUltrasonicInvalid))
     {
         text += "ultrasonic_invalid;";
     }
+
     if (hasFault(faultMask, kFaultEnergyOffline))
     {
         text += "energy_offline;";
     }
+
     return text;
 }
