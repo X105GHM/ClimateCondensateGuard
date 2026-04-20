@@ -53,6 +53,8 @@ The system is designed for a mobile air conditioner setup where condensate water
 
 ![Hardware Setup 3](Pics/Pump5.png)
 
+![Hardware Setup 4](Pics/Waveshare_ESP32_S3.jpg)
+
 ---
 
 ## Hardware
