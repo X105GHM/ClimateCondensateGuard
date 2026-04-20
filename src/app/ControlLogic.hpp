@@ -13,11 +13,14 @@
 class ControlLogic
 {
 public:
-    ControlLogic(Logger &logger,
-                 SharedState &sharedState,
-                 PumpController &pump,
-                 ClimateController &climate,
-                 BuzzerController &buzzer);
+    ControlLogic
+    (
+        Logger &logger,
+        SharedState &sharedState,
+        PumpController &pump,
+        ClimateController &climate,
+        BuzzerController &buzzer
+    );
 
     void tick();
     void requestMode(OperationMode mode);
@@ -49,4 +52,7 @@ private:
     uint32_t forcedPumpUntilMs_ {0};
 
     uint32_t faultResetGraceUntilMs_ {0};
+
+    bool autoCoolingCandidateAllowed_ {false};
+    uint32_t autoCoolingCandidateSinceMs_ {0};
 };

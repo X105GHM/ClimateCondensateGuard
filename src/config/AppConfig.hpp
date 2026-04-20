@@ -73,6 +73,7 @@ namespace config
         int32_t startExportThresholdW = 1500;
         int32_t stopImportThresholdW = 1500;
         uint16_t minBatterySocPercent = 25;
+        uint32_t decisionHoldMs = 30000;
         uint32_t pollIntervalMs = 5000;
     };
 

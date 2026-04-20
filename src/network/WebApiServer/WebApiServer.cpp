@@ -198,7 +198,7 @@ void WebApiServer::handleResetFaults()
 
 void WebApiServer::handlePumpPrime()
 {
-    const int seconds = server_.hasArg("seconds") ? server_.arg("seconds").toInt() : 5;
+    const int seconds = server_.hasArg("seconds") ? server_.arg("seconds").toInt() : 10;
     const uint32_t clampedSeconds = static_cast<uint32_t>(constrain(seconds, 1, 60));
 
     controlLogic_.requestPumpPrime(clampedSeconds * 1000UL);

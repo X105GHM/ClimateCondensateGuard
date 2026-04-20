@@ -257,26 +257,60 @@ bool ControlLogic::evaluateAutomaticCoolingPermission(const SystemStateData &sna
         return false;
     }
 
+    bool rawAllowed = false;
+
     if (autoCoolingAllowed_)
     {
         if (snapshot.energy.gridPointPowerW > config::kEnergy.stopImportThresholdW ||
             snapshot.energy.batterySocPercent < config::kEnergy.minBatterySocPercent)
         {
-            logger_.warn("energy", "Cooling auto permit removed");
-            return false;
+            rawAllowed = false;
         }
-
-        return true;
+        else
+        {
+            rawAllowed = true;
+        }
     }
-
-    if (snapshot.energy.gridPointPowerW <= -config::kEnergy.startExportThresholdW &&
-        snapshot.energy.batterySocPercent >= config::kEnergy.minBatterySocPercent)
+    else if (snapshot.energy.gridPointPowerW <= -config::kEnergy.startExportThresholdW &&
+             snapshot.energy.batterySocPercent >= config::kEnergy.minBatterySocPercent)
     {
-        logger_.info("energy", "Cooling auto permit granted");
-        return true;
+        rawAllowed = true;
     }
 
-    return false;
+    if (rawAllowed == autoCoolingAllowed_)
+    {
+        autoCoolingCandidateSinceMs_ = 0U;
+        autoCoolingCandidateAllowed_ = rawAllowed;
+        return autoCoolingAllowed_;
+    }
+
+    const uint32_t now = millis();
+
+    if (autoCoolingCandidateSinceMs_ == 0U || autoCoolingCandidateAllowed_ != rawAllowed)
+    {
+        autoCoolingCandidateAllowed_ = rawAllowed;
+        autoCoolingCandidateSinceMs_ = now;
+        return autoCoolingAllowed_;
+    }
+
+    if ((now - autoCoolingCandidateSinceMs_) < config::kEnergy.decisionHoldMs)
+    {
+        return autoCoolingAllowed_;
+    }
+
+    autoCoolingCandidateSinceMs_ = 0U;
+    autoCoolingCandidateAllowed_ = rawAllowed;
+
+    if (rawAllowed)
+    {
+        logger_.info("energy", "Cooling auto permit granted (stable)");
+    }
+    else
+    {
+        logger_.warn("energy", "Cooling auto permit removed (stable)");
+    }
+
+    return rawAllowed;
 }
 
 String ControlLogic::faultsToText(const uint32_t faultMask) const
